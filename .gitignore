@@ -1,0 +1,142 @@
+# ---------------------------------------------------------------------------
+# Virtual environments
+#
+# There are ~9,900 files under the venvs in this tree. None of them belong in
+# version control. Recreate with the per-component instructions in README.md.
+# ---------------------------------------------------------------------------
+.venv/
+*/.venv/
+**/.venv/
+venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Python build / cache artefacts
+# ---------------------------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# ---------------------------------------------------------------------------
+# Test / lint / type-check caches
+# ---------------------------------------------------------------------------
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Terraform
+#
+# State files are the highest-value secret in this repo: they contain resolved
+# resource names, project numbers and, depending on provider, secret material.
+# ---------------------------------------------------------------------------
+.terraform/
+**/.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ---------------------------------------------------------------------------
+# Configuration and secrets
+#
+# .env.example IS tracked and is the single documented source of every
+# environment-specific value. .env is the operator's filled-in copy and must
+# never be committed.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.local.env
+
+# Credentials, tokens and keys of every shape.
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+*_rsa
+*_rsa.pub
+*.jks
+*.keystore
+credentials.json
+client_secret*.json
+service-account*.json
+sa-key*.json
+*-credentials.json
+application_default_credentials.json
+*_application_default_credentials.json
+token.json
+tokens.json
+*_token.json
+entra_token.json
+.gcloud/
+.azure/
+.msal_cache*
+
+# ---------------------------------------------------------------------------
+# Logs and captured output
+# ---------------------------------------------------------------------------
+*.log
+logs/
+*.out
+*.err
+
+# ---------------------------------------------------------------------------
+# Editors and operating systems
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Scratch
+# ---------------------------------------------------------------------------
+/tmp/
+scratch/
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Rendered BigQuery SQL (apply.sh output; contains real identifiers)
+bigquery/.rendered/
+
+# ---------------------------------------------------------------------------
+# Sanitisation audit record.
+#
+# SANITISATION.md quotes every pre-sanitisation identifier verbatim, because an
+# audit record has to. Committing it would undo the sanitisation. It is an
+# operator artefact; keep it out of the repository.
+# ---------------------------------------------------------------------------
+SANITISATION.md

@@ -1,0 +1,31 @@
+# Pinned dependency set for the BigQuery-as-the-signed-in-user agent.
+#
+# PINNING RATIONALE (every line here is load-bearing; read before bumping)
+#
+# google-adk==2.8.0
+#   The per-user credential design depends on `McpToolset(header_provider=...)`
+#   being invoked AT TOOL-CALL TIME with the live invocation context, not at
+#   toolset construction time. That behaviour was verified live in
+#   `layer3/concurrency_spike.py` on exactly this version (54 concurrent
+#   invocations, two real identities, zero cross-user leaks). It is the whole
+#   basis of ADR 002, so the version is pinned exactly rather than floated.
+#   2.8.0 also renames `MCPToolset` -> `McpToolset` (old name deprecated) and
+#   ships bounded MCP session pooling, both of which this code relies on.
+#
+# mcp>=1.29.1,<2
+#   HARD CONSTRAINT, verified: google-adk 2.8.0 imports
+#   `from mcp.shared.session import ProgressFnT`. MCP SDK 2.x restructured its
+#   modules and that import raises ModuleNotFoundError, so an unpinned `mcp`
+#   resolves to 2.x and the deployed agent dies at import, not at first call.
+#   The floor is the version resolved and imported successfully here.
+#
+# google-cloud-aiplatform[adk,agent_engines]==2.1.0
+#   Supplies `vertexai.agent_engines.create(...)` and the `AdkApp` template.
+#   The template's `streaming_agent_run_with_events` is the method ADR 005
+#   commits the middle tier to, and its `authorizations -> temp:` state
+#   forwarding is the request-scoped, non-persisted credential channel this
+#   agent reads. Both are template-internal behaviours, so the SDK is pinned
+#   exactly: a template change here silently changes the credential path.
+google-adk==2.8.0
+mcp>=1.29.1,<2
+google-cloud-aiplatform[adk,agent_engines]==2.1.0

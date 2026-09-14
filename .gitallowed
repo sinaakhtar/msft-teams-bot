@@ -1,0 +1,25 @@
+# git-secrets allowlist.
+#
+# Deliberately NARROW. Each entry below permits one specific, self-evidently
+# fake literal that exists so a test can prove a real credential would never
+# be persisted or logged. Any OTHER "ya29." string still trips the scanner,
+# which is the point: these tests are about credential handling, so they must
+# contain credential-shaped strings, and that must not blind the scanner to a
+# real one.
+#
+# A genuine Google OAuth access token is a couple of hundred characters of
+# base64. Every literal below is a short descriptive phrase. If you add a
+# fixture, give it an obviously-fake descriptive name and add it here rather
+# than loosening the pattern or committing with --no-verify.
+
+# Detection logic, not a secret: the prefixes the credential guard looks for.
+value\.startswith\(\("ya29\.", "Bearer ", "eyJ"\)\)
+
+# Test fixtures proving a token is never written to durable session state.
+ya29\.persisted-and-therefore-forbidden
+ya29\.super-secret
+ya29\.THIS-TOKEN-MUST-NEVER-BE-PERSISTED
+
+# Test fixtures for the wiring and session-manager suites.
+ya29\.a0-fake-user-access-token
+ya29\.fake-workforce-principal-access-token

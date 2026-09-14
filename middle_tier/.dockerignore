@@ -1,0 +1,17 @@
+# Keep the build context small and, more importantly, keep local material out
+# of the image. A stray .env or a local venv in a layer is a credential leak
+# and an architecture mismatch respectively.
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+tests/
+NOTES.md
+README.md
+.env
+*.env
+*.json.key
+*.pem
+.git/
+.gitignore

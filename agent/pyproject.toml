@@ -1,0 +1,35 @@
+[project]
+name = "bq-agent"
+version = "0.1.0"
+description = "ADK agent that queries BigQuery as the signed-in Microsoft user, via the BigQuery MCP endpoint."
+requires-python = ">=3.11,<3.14"
+
+# Keep this list byte-identical to requirements.txt. deploy.py reads
+# requirements.txt (not this file) and ships it to Agent Runtime, so a drift
+# between the two means "works locally, breaks in the runtime".
+# See requirements.txt for the full pinning rationale; the short version:
+#   - google-adk 2.8.0 is the version the per-user header_provider behaviour
+#     was verified on.
+#   - mcp<2 is mandatory: ADK 2.8.0 imports mcp.shared.session.ProgressFnT,
+#     which MCP 2.x removed. Unpinned, the deploy breaks at import.
+dependencies = [
+    "google-adk==2.8.0",
+    "mcp>=1.29.1,<2",
+    "google-cloud-aiplatform[adk,agent_engines]==2.1.0",
+]
+
+[project.optional-dependencies]
+# Local harness only. NEVER add these to the deployed requirements: the
+# runtime must not grow a dependency the credential path does not need.
+dev = [
+    "httpx>=0.28",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bq_agent*"]

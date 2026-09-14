@@ -1,0 +1,198 @@
+title: Teams to Agent Runtime Architecture
+subtitle: Dual-plane federated identity (ADR 002) · Direct Reasoning Engine & ADK streaming (ADR 001, 005) · Fail-closed auth (ADR 004)
+direction: LR
+canvas:
+  width: 2040
+  height: 980
+  background: "#FFFFFF"
+
+groups:
+  - id: system_plane
+    label: End-to-End Enterprise System Topology
+    tier: L1
+    direction: LR
+    children: [microsoft_lane, middle_tier_lane, geap_lane, data_lane]
+
+  - id: microsoft_lane
+    label: Microsoft 365 & Entra ID
+    tier: L1t
+    direction: TB
+    children: [entra_id, teams_client, azure_bot, auth_card]
+
+  - id: middle_tier_lane
+    label: Bot Middle Tier (Cloud Run)
+    tier: L1z
+    direction: TB
+    children: [id_broker, inbound_router, event_streamer, error_boundary]
+
+  - id: geap_lane
+    label: Google Cloud · Agent Platform
+    tier: L1c
+    direction: TB
+    children: [google_sts, sessions_svc, agent_runtime, bq_mcp]
+
+  - id: data_lane
+    label: Google Cloud · Data & Governance
+    tier: L1t
+    direction: TB
+    children: [workforce_iam, audit_logs, bq_storage, bigquery]
+
+nodes:
+  # --- Microsoft Lane (4 nodes) ---
+  - id: entra_id
+    label: Microsoft Entra ID
+    sublabel: OIDC IdP · OBO Token Service
+    icon: access_context_manager
+    tier: L2
+    badge: Plane 1 (ADR 002)
+    width: 320
+
+  - id: teams_client
+    label: Microsoft Teams Client
+    sublabel: 1:1 Chat · User SSO Token
+    icon: user
+    tier: L2
+    badge: Client
+    width: 320
+
+  - id: azure_bot
+    label: Azure Bot Service
+    sublabel: Bot Framework Messaging Gateway
+    icon: network
+    tier: L2
+    badge: Webhook
+    width: 320
+
+  - id: auth_card
+    label: Teams Sign-in Card
+    sublabel: Fail-closed re-authentication
+    icon: armor
+    tier: L2s
+    badge: ADR 004
+    width: 320
+
+  # --- Bot Middle Tier Lane (4 nodes) ---
+  - id: id_broker
+    label: Identity Broker
+    sublabel: Entra OBO → Google STS exchange
+    icon: iam
+    tier: L2b
+    badge: Plane 1 (ADR 002)
+    width: 330
+
+  - id: inbound_router
+    label: Inbound Auth & Router
+    sublabel: Validates aadObjectId → entra:{tid}:{oid}
+    icon: run
+    tier: L2b
+    badge: ADR 003
+    width: 330
+
+  - id: event_streamer
+    label: Event Streamer & Buffer
+    sublabel: Consumes ADK events · Teams sink
+    icon: pubsub
+    tier: L2b
+    badge: ADR 005
+    width: 330
+
+  - id: error_boundary
+    label: Error Boundary & Templates
+    sublabel: Intercepts 403s · fail-closed handler
+    icon: armor
+    tier: L2b
+    badge: ADR 004
+    width: 330
+
+  # --- GEAP Lane (4 nodes) ---
+  - id: google_sts
+    label: Security Token Service
+    sublabel: Workforce Identity Pool Provider
+    icon: iam
+    tier: L2
+    badge: Plane 1 (ADR 002)
+    width: 330
+
+  - id: sessions_svc
+    label: Managed Sessions Service
+    sublabel: REST /sessions subresource
+    icon: database
+    tier: L2
+    badge: ADR 001 / 003
+    width: 330
+
+  - id: agent_runtime
+    label: Agent Runtime (Reasoning Engine)
+    sublabel: streaming_agent_run_with_events
+    icon: gemini
+    tier: L3m
+    badge: ADR 001 / 005
+    width: 330
+
+  - id: bq_mcp
+    label: Managed BigQuery MCP Server
+    sublabel: Tool boundary · forwards bearer
+    icon: bigquery
+    tier: L2
+    badge: Plane 2 (ADR 002)
+    width: 330
+
+  # --- Data & Governance Lane (4 nodes) ---
+  - id: workforce_iam
+    label: Cloud IAM Policy
+    sublabel: Bound to principal://... subject
+    icon: iam
+    tier: L2
+    badge: RBAC
+    width: 320
+
+  - id: audit_logs
+    label: Cloud Audit Logs
+    sublabel: Attributed to human Workforce Principal
+    icon: logging
+    tier: L2
+    badge: Governance
+    width: 320
+
+  - id: bq_storage
+    label: Datasets & Tables
+    sublabel: Resource-level IAM access controls
+    icon: database
+    tier: L2
+    badge: Data Plane
+    width: 320
+
+  - id: bigquery
+    label: BigQuery Query Engine
+    sublabel: Executes SQL as Workforce Principal
+    icon: bigquery
+    tier: L2
+    badge: Plane 2 (ADR 002)
+    width: 320
+
+edges:
+  # Row 1: Plane 1 Identity Exchange (ADR 002)
+  - {from: id_broker,      to: entra_id,       style: flow_blue,  label: "OBO (v2)"}
+  - {from: id_broker,      to: google_sts,     style: flow_blue,  label: "STS token"}
+  - {from: google_sts,     to: workforce_iam,  style: control,    label: "IAM policy"}
+
+  # Row 2: Ingress & Session Keying (ADR 001, ADR 003)
+  - {from: teams_client,   to: azure_bot,      style: flow_green, label: "Prompt"}
+  - {from: azure_bot,      to: inbound_router, style: flow_blue,  label: "aadObjectId"}
+  - {from: inbound_router, to: sessions_svc,   style: flow_blue,  label: "REST /sessions"}
+  - {from: sessions_svc,   to: audit_logs,     style: grounding,  label: "Audit session"}
+
+  # Row 3: Agent Invocation & Streaming (ADR 001, ADR 005)
+  - {from: inbound_router, to: agent_runtime,  style: flow_blue,  label: "Invoke (human)"}
+  - {from: agent_runtime,  to: event_streamer, style: flow_blue,  label: "ADK events"}
+  - {from: event_streamer, to: azure_bot,      style: flow_blue,  label: "Stream"}
+
+  # Row 4: Tool Execution & Authorization (Plane 2 - ADR 002)
+  - {from: agent_runtime,  to: bq_mcp,         style: flow_blue,  label: "Bearer token"}
+  - {from: bq_mcp,         to: bigquery,       style: flow_blue}
+  - {from: bigquery,       to: bq_storage,     style: flow_blue,  label: "Table ACL"}
+  - {from: bq_storage,     to: audit_logs,     style: grounding,  label: "Audit"}
+
+  # Downstream Denial Interception & Fail-Closed (ADR 004)
+  - {from: bq_mcp,         to: error_boundary, style: exit_dashed, label: "403 Denied"}
+  - {from: error_boundary, to: auth_card,      style: exit_dashed, label: "Sign-in card"}

@@ -1,0 +1,62 @@
+# Bot Middle Tier - dependency and tooling manifest.
+#
+# WHY pyproject.toml AND NOT requirements.txt
+# -------------------------------------------
+# 1. The middle tier is an importable package (`app.*`), not a loose script
+#    directory. `tests/` imports `app.auth.inbound`; a package manifest gives
+#    that a real, installable identity instead of relying on sys.path luck.
+# 2. Runtime deps, dev/test deps and pytest configuration live in one file, so
+#    there is exactly one place to audit before a Cloud Run deploy.
+# 3. Reproducibility is handled by `requirements.lock.txt`, which is the
+#    *transitive* pin set generated from an actual installed venv. pyproject
+#    pins the direct deps; the lock file pins everything the image will get.
+#    A bare requirements.txt would conflate those two jobs.
+#
+# Versions below are the exact versions that were installed and that the test
+# run in NOTES.md was executed against. They are `==` pins on purpose: this is
+# a security boundary and a silent minor bump of PyJWT is not something we want
+# to discover in production.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "teams-agent-middle-tier"
+version = "0.1.0"
+description = "Bot Middle Tier: Microsoft Teams <-> Google Agent Runtime relay and identity broker"
+requires-python = ">=3.12"
+
+dependencies = [
+  # HTTP server. aiohttp is chosen over FastAPI/uvicorn because the Bot
+  # Framework request/response contract is plain JSON in, 200/401 out, and
+  # because every Microsoft Python bot sample in existence is aiohttp-shaped.
+  "aiohttp==3.14.3",
+
+  # THE security dependency. `[crypto]` is NOT optional for us: without the
+  # cryptography extra, PyJWT does not register RS256 at all and every real
+  # Bot Framework token fails to verify. See NOTES.md - the Microsoft 365
+  # Agents SDK ships without this extra, which we verified by execution.
+  "PyJWT[crypto]==2.13.0",
+  "cryptography==50.0.1",
+
+  # Secret Manager. Bot app password and Entra client secret are read from
+  # here at startup. Never from disk, never baked into the image.
+  "google-cloud-secret-manager==2.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Surface warnings; a DeprecationWarning in the crypto path is a thing we want
+# to see rather than swallow.
+filterwarnings = ["default"]
