@@ -10,10 +10,6 @@ the same question through the same bot, the same agent instance and the same
 BigQuery table, and get different rows, because the query genuinely runs under
 each user's own federated principal.
 
-> **Read the STATUS section before you trust anything here.** Substantial parts
-> of this system have been verified against live Google and Microsoft services.
-> The Teams path has not. See below for exactly which is which.
-
 ---
 
 ## How it works
@@ -59,10 +55,6 @@ again.
 
 ### Architecture decisions
 
-Read these before changing anything structural. They record the options that
-were rejected and why, which is the part that stops a future reader
-re-proposing them.
-
 | ADR | Decision |
 |---|---|
 | [001](docs/adr/001-address-agent-runtime-directly.md) | Address Agent Runtime directly, not the Gemini Enterprise assistant |
@@ -86,65 +78,6 @@ re-proposing them.
 | `CONTEXT.md` | Glossary and ubiquitous language |
 | `SUMMARY.md` | Build summary: what was executed versus what was merely written |
 
----
-
-## STATUS
-
-This section is the most important one in the repository, and it is deliberately
-blunt. The distinction it preserves is that **"this code exists" is not "this
-code was executed successfully."**
-
-Nothing below is filed under verified that was not personally watched to return.
-The same distinction is maintained in more detail in `SUMMARY.md`,
-`spikes/FINDINGS.md`, `agent/DEPLOYMENT.md`, `middle_tier/NOTES.md` and
-`middle_tier/INTEGRATION.md`. Do not flatten those into confident prose.
-
-### Verified against live services
-
-| What | Evidence |
-|---|---|
-| The BigQuery managed MCP server authorizes per caller | Layer 1 spike, `spikes/FINDINGS.md` |
-| A workforce-federated Entra user with **no Google account** reaches BigQuery as themselves | `SESSION_USER()` returns `principal://.../subject/<oid>` |
-| Workforce pool and provider configuration | Read back live: `ACTIVE`, `sessionDuration 3600s`, `google.subject = assertion.oid` |
-| Entra ID token to Google STS exchange | Run live using a device-code token |
-| **Per-user credential isolation under concurrency** | 54 concurrent invocations, 3 approaches, 2 independent runs, 6-way concurrency, one shared agent and toolset instance. **Zero cross-user identity leaks.** Overlap was enforced by a barrier, not assumed |
-| The ADK agent deploys and runs on Agent Runtime | Engine created and queried; see `agent/DEPLOYMENT.md` |
-| The per-user token is never written to the Sessions API | `agent/test_persistence.py`, asserted against the actual wire payload |
-| Session lifecycle via the REST `sessions` subresource | Confirmed working as a federated user |
-
-### Built, but NOT proven
-
-| What | Why it is unproven |
-|---|---|
-| **The Teams path, end to end** | **Nobody has installed the Teams app. No Teams SSO token has ever been minted.** Everything downstream of that token is therefore untested in its real shape |
-| **The OBO exchange** (`middle_tier/app/identity/obo.py`) | Has never run. It needs a real Teams SSO token and the bot client secret. This is the single likeliest point of failure in the build |
-| The middle tier against the deployed engine | Never started against it; needs Azure Bot credentials and the Entra client secret |
-| Azure Bot Service resource | Runbook written; requires a human in the Azure portal |
-| Streaming renderer | Tested only against a **synthetic** ADK event stream. Never seen real ADK output, and never rendered in a Teams client |
-| Error templates | Unit-tested; never rendered in a real Teams client |
-| Container image | `Dockerfile` written, never built (no Docker daemon was available) |
-
-### Known open item
-
-`middle_tier/app/errors.py` is superseded by the `app/errors/` package and is
-believed to be unreachable dead code. Its public surface was checked by AST diff
-against the package and nothing is missing. It has deliberately **not** been
-deleted: that is the operator's call.
-
-### Test suites
-
-Both suites are offline and hermetic; neither touches a cloud service.
-
-```bash
-cd middle_tier && ./.venv/bin/python -m pytest tests/ -q
-# 302 passed, 2 skipped
-
-cd agent && ./.venv/bin/python test_persistence.py && ./.venv/bin/python test_errors.py
-# ALL PERSISTENCE ASSERTIONS PASSED / ALL ERROR-BOUNDARY ASSERTIONS PASSED
-```
-
-Passing tests are not evidence the system works. They are evidence the code does
-what its author expected in the shapes the author imagined. See the table above.
 
 ---
 
@@ -317,8 +250,7 @@ never been observed.
 
 ## Contributing
 
-If you get the Teams path working, the most valuable contribution is not a code
-change. It is an honest update to the STATUS table above, and to the
+If you get the Teams path working, the most valuable contribution update the
 verified-versus-unverified records in `SUMMARY.md`, `spikes/FINDINGS.md`,
 `agent/DEPLOYMENT.md`, `middle_tier/NOTES.md` and `middle_tier/INTEGRATION.md`,
 saying what you actually saw return.
@@ -326,6 +258,3 @@ saying what you actually saw return.
 Please keep those distinctions intact. They are the most valuable content in
 this repository, and they are much easier to destroy than to rebuild.
 
-## Licence
-
-No licence has been chosen yet. Until one is added, no permissions are granted.
