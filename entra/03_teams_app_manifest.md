@@ -3,6 +3,10 @@
 **Prerequisite:** pages 01 and 02 complete. You need `<APP_A_CLIENT_ID>` and a
 public HTTPS `<BOT_DOMAIN>` serving `/api/messages`.
 
+**Where `<BOT_DOMAIN>` comes from:**
+- If deploying to **Cloud Run**, deploy the middle tier first (Stage 5 in `README.md`). The domain is your Cloud Run service URL with `https://` stripped (for example `middle-tier-xyz-ew.a.run.app`). Do not package this manifest before Cloud Run is deployed.
+- If developing **locally**, start your tunnel first (such as `ngrok http 8000`) and use the tunnel hostname.
+
 **Do page 04 first if you can.** Verification is cheaper than debugging through
 the Teams client, where every failure surfaces as the same shrug of an error.
 

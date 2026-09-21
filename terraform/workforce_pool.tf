@@ -5,8 +5,15 @@
 #   //iam.googleapis.com/locations/global/workforcePools/teams-bot-demo/providers/entra
 # and the caller becomes a workforce principal that Google Cloud IAM can name.
 #
-# BOTH RESOURCES ALREADY EXIST AND ARE ACTIVE. They must be imported, not created.
-# See IMPORT.md. `prevent_destroy` below is the seatbelt; do not remove it casually.
+# WORKFORCE POOL LIFECYCLE:
+# For fresh deployments into a new GCP organization or project without an existing pool,
+# Terraform creates the pool and provider directly on `terraform apply`.
+#
+# If a workforce pool and provider already exist in your organization (for example,
+# configured in a shared sandbox or created out of band), you must import them into
+# state before running apply to avoid collision errors.
+# See IMPORT.md for the step-by-step import procedure.
+# `prevent_destroy` below is the seatbelt; do not remove it casually.
 
 resource "google_iam_workforce_pool" "teams_bot_demo" {
   # Workforce pools are ORGANIZATION-level, which is why parent is an org and not a
@@ -24,10 +31,10 @@ resource "google_iam_workforce_pool" "teams_bot_demo" {
   disabled         = false
 
   lifecycle {
-    # This pool is the demo. Recreating it invalidates every issued credential and
-    # every IAM binding that names its principalSet, and deleted workforce pools sit
-    # in a soft-deleted state that blocks reusing the same ID for 30 days. Any plan
-    # that wants to replace this resource is a bug in the config, not an intention.
+    # Recreating the pool invalidates every issued credential and every IAM binding
+    # that names its principalSet, and deleted workforce pools sit in a soft-deleted
+    # state that blocks reusing the same ID for 30 days. `prevent_destroy` protects
+    # against accidental destruction once created or imported.
     prevent_destroy = true
   }
 }
@@ -88,6 +95,8 @@ resource "google_iam_workforce_pool_provider" "entra" {
   }
 
   lifecycle {
+    # The provider evaluates incoming tokens against Entra ID. `prevent_destroy` protects
+    # against accidental deletion once created or imported.
     prevent_destroy = true
   }
 }

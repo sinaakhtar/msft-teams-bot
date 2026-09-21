@@ -7,8 +7,9 @@ Application Administrator role.
 Service points at, that Teams SSO mints tokens for, and that will perform the
 On-Behalf-Of call in page 02.
 
-**Placeholders you will fill in:** `<APP_A_CLIENT_ID>`, `<APP_A_CLIENT_SECRET>`,
-`<BOT_DOMAIN>`. Record them on the checklist in [NOTES.md](NOTES.md).
+**Placeholders you will fill in:** `<APP_A_CLIENT_ID>`, `<APP_A_CLIENT_SECRET>`.
+(`<BOT_DOMAIN>` is needed in Steps 7 and 8 only, and can be backfilled once the
+middle tier is deployed or tunneled). Record them on the checklist in [NOTES.md](NOTES.md).
 
 ---
 
@@ -213,6 +214,12 @@ Teams SSO fails in some legitimate situations — the user has not consented, th
 tenant requires step-up MFA, or the mobile WebView blocks the silent iframe
 token acquisition. In those cases the bot falls back to an interactive sign-in
 popup, and that popup needs a registered redirect URI.
+
+> **Deployment sequencing note:** If deploying to Cloud Run, you can complete
+> Steps 1 through 6 first to obtain `<APP_A_CLIENT_ID>` and `<APP_A_CLIENT_SECRET>`,
+> complete page 02, deploy the backend and Cloud Run middle tier, and then return here
+> to register the Redirect URI (Step 7) and Azure Bot endpoint (Step 8). For local dev,
+> start your tunnel (such as `ngrok http 8000`) and use that hostname immediately.
 
 1. Left nav: **Manage** → **Authentication**.
 2. Click **+ Add a platform** → **Web**.

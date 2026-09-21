@@ -1,13 +1,27 @@
-# Adopting the existing infrastructure into Terraform state
+# Adopting existing infrastructure into Terraform state
 
-## Read this first
+## Read this first: when to use this document
 
-The workforce pool `teams-bot-demo` and its `entra` provider **already exist and are
-working**. A federated Entra user has already queried BigQuery as themselves through
-them. This config describes that reality; it must **adopt** it, not rebuild it.
+This document is **only** required when you are adopting pre-existing infrastructure
+into Terraform state.
 
-With an empty state, Terraform does not know any of it exists. This was run for real,
-against this config:
+### Scenario A: Fresh deployment (no import required)
+
+If you are setting up this repository from scratch in a new organization, tenant,
+or GCP project without an existing workforce pool:
+
+1. **Do not run the import commands in this document.**
+2. Configure your deployment variables in `terraform/terraform.tfvars` (including
+   `org_id`, `project_id`, `entra_tenant_id`, and `entra_federation_client_id`).
+3. Run `terraform init`, `terraform plan`, and `terraform apply`.
+4. Terraform will create the workforce pool, OIDC provider, service accounts, IAM
+   bindings, and BigQuery datasets directly from scratch.
+
+### Scenario B: Adopting pre-existing infrastructure
+
+If a workforce pool (such as `teams-bot-demo`) and its Entra provider already exist
+in your Google Cloud organization (for example, created out of band or in a shared
+sandbox), Terraform does not know they exist when starting with an empty state:
 
 ```
 $ terraform plan
@@ -17,8 +31,8 @@ Plan: 22 to add, 0 to change, 0 to destroy.
 Twenty-two creates, including `google_iam_workforce_pool.teams_bot_demo` and
 `google_iam_workforce_pool_provider.entra`. **Applying that plan without importing
 first is the failure mode this document exists to prevent.** The pool create would
-collide with the live pool and fail, and you would be left half-applied, mid-demo,
-debugging IAM.
+collide with the live pool and fail, leaving state half-applied. In this scenario,
+follow the import steps below before running `terraform apply`.
 
 > ### `terraform destroy` on this config would take down a working demo
 >

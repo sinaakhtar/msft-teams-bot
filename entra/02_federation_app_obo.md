@@ -1,12 +1,17 @@
-# 02 — Configure App B for On-Behalf-Of
+# 02: Configure App B for On-Behalf-Of
 
 **App B is `<FEDERATION_APP_CLIENT_ID>`, the Google-facing federation
-app. It already exists and it already works.**
+app registration in Microsoft Entra ID.**
 
-Everything on this page is **additive**. None of it changes App B's client ID,
+If you are setting up from scratch on a new tenant, you will create App B first (Step 0)
+and register its client ID with Google Cloud's Workforce Identity Pool provider.
+If App B was already created as part of an existing Workforce Identity Federation setup,
+Step 0 is already done and you can proceed directly to opening it.
+
+Everything configured on this page is **additive**. None of it changes App B's client ID,
 its issuer, or anything the Google workforce pool provider is configured
-against. One step (Step 4) changes the *format* of access tokens App B receives;
-Step 4 explains why that is safe for the already-proven ID-token path.
+against. One step (Step 4) changes the format of access tokens App B receives;
+Step 4 explains why that is safe for the ID-token path.
 
 **Who runs this:** `m365-admin@<TENANT_DOMAIN>`. Steps 5 and 6 need
 Global Administrator or Privileged Role Administrator to grant tenant-wide
@@ -22,7 +27,7 @@ Four things, in this order:
 
 1. An **Application ID URI**, because you cannot expose a scope without one.
 2. An exposed delegated scope, **`access_as_user`**.
-3. **App A listed in `preAuthorizedApplications`** — on App B, naming App A.
+3. **App A listed in `preAuthorizedApplications`**: on App B, naming App A.
 4. **`requestedAccessTokenVersion` set to `2`.** This is the one that silently
    breaks everything if you skip it.
 
@@ -66,38 +71,58 @@ On-Behalf-Of flow*,
 
 ---
 
-## Step 1 — Open App B
+## Step 0: Create App B (if starting from scratch)
+
+If App B does not already exist in your tenant:
+
+1. In the Microsoft Entra admin center (<https://entra.microsoft.com>), navigate to
+   **Identity** → **Applications** → **App registrations**.
+2. Click **+ New registration**.
+3. **Name**: `google-cloud-workforce-federation` (or your preferred name).
+4. **Supported account types**: Select **Accounts in this organizational directory only (Single tenant)**.
+5. **Redirect URI**: Leave blank (App B is a downstream API resource, not a web client).
+6. Click **Register**.
+7. From the **Overview** blade, copy the **Application (client) ID**. This GUID is
+   your `<FEDERATION_APP_CLIENT_ID>`.
+8. Configure this Client ID on Google Cloud: supply it as `entra_federation_client_id`
+   in your Terraform variables (or as `--client-id` if creating the Workforce Pool
+   OIDC provider via `gcloud`). Google's workforce pool will only accept assertions
+   audienced to this client ID.
+
+If App B already exists from an existing federation setup, skip directly to Step 1.
+
+---
+
+## Step 1: Open App B
 
 1. <https://entra.microsoft.com> → **Entra ID** → **App registrations**.
-2. Select the **All applications** tab. App B may not be under *Owned
-   applications* if it was created by a different account or by terraform.
+2. Select the **All applications** tab.
 3. Search for `<FEDERATION_APP_CLIENT_ID>`.
 4. Open it and confirm on **Overview** that the **Application (client) ID**
    reads `<FEDERATION_APP_CLIENT_ID>` exactly.
 
-> If you cannot find it, do **not** create a new app with a similar name. It
-> exists — Google's provider is configured against it and a device-code sign-in
-> through it was verified working. A missing app means you are in the wrong
-> tenant. Check the directory selector reads `<TENANT_DOMAIN>`.
+> If you already configured Google's Workforce Identity Pool with an existing App B,
+> make sure you open that exact app registration. Google's provider validates incoming
+> assertions against this specific client ID.
 
-## Step 2 — Set or confirm the Application ID URI
+## Step 2: Set or confirm the Application ID URI
 
 1. **Manage** → **Expose an API**.
 2. If **Application ID URI** is already set, **record its exact value and leave
-   it alone** — something may already depend on it. Skip to Step 3.
+   it alone** (something may already depend on it). Skip to Step 3.
 3. If it is blank, click **Add**, accept the prefilled default, and **Save**:
 
    ```
    api://<FEDERATION_APP_CLIENT_ID>
    ```
 
-Use the plain `api://{clientId}` form. Do not use the `botid-` form here — that
+Use the plain `api://{clientId}` form. Do not use the `botid-` form here; that
 convention belongs to Teams bot apps, and App B is not one.
 
 Setting an Application ID URI does not alter the client ID and does not affect
 Google's provider configuration.
 
-## Step 3 — Expose the `access_as_user` scope on App B
+## Step 3: Expose the `access_as_user` scope on App B
 
 1. Still on **Expose an API**, click **+ Add a scope**.
 2. Fill in:
@@ -123,12 +148,12 @@ read. App A's scope is a within-Microsoft hop and can be user-consentable;
 App B's is the boundary crossing. Since App A is pre-authorized in Step 4 and an
 admin consents in Step 6, no user is ever prompted regardless.
 
-## Step 4 — Pre-authorize App A, and set the access token version
+## Step 4: Pre-authorize App A, and set the access token version
 
 Two changes. The second is the critical one, and doing them together in the
 manifest editor is faster and less error-prone than the forms.
 
-### 4a — Pre-authorize App A (portal form)
+### 4a: Pre-authorize App A (portal form)
 
 1. **Expose an API** → **Authorized client applications** →
    **+ Add a client application**.
@@ -137,7 +162,7 @@ manifest editor is faster and less error-prone than the forms.
    `api://<FEDERATION_APP_CLIENT_ID>/access_as_user`.
 4. **Add application**.
 
-### 4b — Set `requestedAccessTokenVersion` to 2 — DO NOT SKIP THIS
+### 4b: Set `requestedAccessTokenVersion` to 2: DO NOT SKIP THIS
 
 1. Left nav within App B: **Manage** → **Manifest**.
 2. You will see a toggle or two tabs: **Microsoft Graph App Manifest (New)** and
@@ -177,16 +202,16 @@ Two facts, both from current Microsoft documentation:
 1. **Default is 1.** *"Possible values for `requestedAccessTokenVersion` are 1,
    2, or null. If the value is null, this parameter defaults to 1, which
    corresponds to the v1.0 endpoint."*
-   — <https://learn.microsoft.com/en-us/entra/identity-platform/reference-app-manifest>
+   Source: <https://learn.microsoft.com/en-us/entra/identity-platform/reference-app-manifest>
 
 2. **Version determines `aud`.** *"Identifies the intended audience of the
    token. In v2.0 tokens, this value is always the client ID of the API. In v1.0
    tokens, it can be the client ID or the resource URI used in the request."*
-   — <https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference>
+   Source: <https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference>
 
 And on Google's side, from the STS API reference for the `subjectToken`
 parameter: for workforce pools, the JWT's `aud` **must match the client ID
-specified in the provider configuration** —
+specified in the provider configuration:
 <https://cloud.google.com/iam/docs/reference/sts/rest/v1/TopLevel/token>
 
 Put together:
@@ -208,13 +233,13 @@ disturbing it.
 Microsoft: *"The endpoint used, v1.0 or v2.0, is chosen by the client and only
 impacts the version of `id_tokens`. Resources need to explicitly configure
 `requestedAccessTokenVersion` to indicate the supported access token format."*
-— <https://learn.microsoft.com/en-us/entra/identity-platform/reference-app-manifest>
+Source: <https://learn.microsoft.com/en-us/entra/identity-platform/reference-app-manifest>
 
 `requestedAccessTokenVersion` governs **access tokens only**. The ID token your
 device-code flow produces is unaffected. Re-run that flow after this change as a
-regression check anyway — it takes a minute and it is the control sample.
+regression check anyway: it takes a minute and it is the control sample.
 
-## Step 5 — Grant App A permission to call App B
+## Step 5: Grant App A permission to call App B
 
 Now switch to **App A**.
 
@@ -228,13 +253,13 @@ Now switch to **App A**.
    > nothing useful and misleads whoever reviews this next.
 
 4. Select the federation app, `<FEDERATION_APP_CLIENT_ID>`.
-5. Choose **Delegated permissions**. Not *Application permissions* — this flow
+5. Choose **Delegated permissions**. Not *Application permissions*: this flow
    carries a user identity; application permissions are the app-only flow and
    would defeat the entire point of the design.
 6. Tick **`access_as_user`**.
 7. Click **Add permissions**.
 
-## Step 6 — Grant admin consent
+## Step 6: Grant admin consent
 
 Still on App A's **API permissions** page:
 
@@ -281,7 +306,7 @@ curl -sS -X POST \
 `offline_access` speculatively. Adding `openid` will *not* get you an ID token
 (see below), and mixing `.default` with named delegated scopes throws
 `AADSTS70011`. If you later want a refresh token to avoid re-running OBO on
-every turn, add `offline_access` — and only that.
+every turn, add `offline_access` (and only that).
 
 **Certificate credentials instead of a secret.** Microsoft's preferred form
 replaces `client_secret` with `client_assertion_type` +
@@ -292,7 +317,7 @@ hardening for anything real.
 ## The response: an access token, and only an access token
 
 Microsoft's OBO response is documented as containing `token_type`, `scope`,
-`expires_in`, `access_token`, and — if `offline_access` was requested —
+`expires_in`, `access_token`, and (if `offline_access` was requested)
 `refresh_token`.
 
 **There is no `id_token` in the OBO response.** Not by default, and not by
@@ -313,14 +338,14 @@ Take `access_token`. That is what goes to Google's STS.
 
 ---
 
-## RISK — read this before you run anything
+## RISK: read this before you run anything
 
 The Google provider was configured with `responseType = ID_TOKEN` and
 `assertionClaimsBehavior = ONLY_ID_TOKEN_CLAIMS`, and the proven-working path
 fed it an **ID token**. OBO gives you an **access token**. That mismatch has two
 independent parts, and they resolve differently. Do not conflate them.
 
-### Part 1 — "access token vs ID token": low risk, understood
+### Part 1: "access token vs ID token": low risk, understood
 
 Google's STS does not consume Entra's *semantics*, it consumes a *JWT*. Per the
 STS API reference, the `subjectToken` must be a JWT in RFC 7523 format with
@@ -339,24 +364,24 @@ pool provider's **browser sign-in** behaviour. A direct `POST` to
 
 Keep `subject_token_type=urn:ietf:params:oauth:token-type:id_token`, which is
 what the proven exchange used. If it is rejected on token *type* grounds,
-`urn:ietf:params:oauth:token-type:jwt` is the documented alternative — try it
+`urn:ietf:params:oauth:token-type:jwt` is the documented alternative. Try it
 before changing anything else.
 
 > One caveat, and it is why the distinction matters at all: Microsoft warns not
 > to parse access tokens for APIs you do not own, because tokens for Microsoft
 > services such as Graph can use a special, non-JWT format. That warning does
-> **not** apply here — App B is an API you own, so its tokens are plain JWTs.
+> **not** apply here: App B is an API you own, so its tokens are plain JWTs.
 > This is another reason the "OBO is for Graph" instinct must be resisted: an
 > OBO token for Graph genuinely would not work with Google's STS.
 
-### Part 2 — the audience format: HIGH risk, and the likeliest failure in the build
+### Part 2: the audience format (HIGH risk, and the likeliest failure in the build)
 
 This is the real hazard.
 
 You are requesting the scope by its **Application ID URI**
-(`api://<FEDERATION_APP_CLIENT_ID>/access_as_user`). If App B emits **v1.0** access tokens —
+(`api://<FEDERATION_APP_CLIENT_ID>/access_as_user`). If App B emits **v1.0** access tokens (
 which is the **default**, since `requestedAccessTokenVersion` is `null` until
-you change it — the resulting `aud` is the **resource URI**,
+you change it), the resulting `aud` is the **resource URI**,
 `api://<FEDERATION_APP_CLIENT_ID>`, not the bare GUID. Google compares
 `aud` against the client ID registered on the provider,
 `<FEDERATION_APP_CLIENT_ID>`. String mismatch. Rejected.
@@ -396,7 +421,7 @@ echo "$OBO_TOKEN" | cut -d. -f2 \
   | base64 -d 2>/dev/null | jq '{aud, iss, oid, ver, sub, exp}'
 ```
 
-**PASS — proceed:**
+**PASS: proceed**
 
 ```json
 {
@@ -409,7 +434,7 @@ echo "$OBO_TOKEN" | cut -d. -f2 \
 }
 ```
 
-**FAIL — go back to Step 4b:**
+**FAIL: go back to Step 4b**
 
 ```json
 {
@@ -425,7 +450,7 @@ editor while the tenant honoured the other. Reload the Manifest blade and check
 the stored value.
 
 Token changes are not always instant. If `ver` is still `1.0` a few minutes after
-a confirmed save, request a fresh token rather than reusing a cached one — Entra
+a confirmed save, request a fresh token rather than reusing a cached one. Entra
 will happily return a cached token in the old format.
 
 ## Checklist

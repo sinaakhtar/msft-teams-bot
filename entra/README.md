@@ -23,6 +23,22 @@ arbitrary.
 | [05_troubleshooting.md](05_troubleshooting.md) | The four errors you will actually hit. |
 | [NOTES.md](NOTES.md) | Placeholder checklist, what is verified vs inferred, what could not be checked. |
 
+## Execution order and `<BOT_DOMAIN>` dependency
+
+The pages in this directory appear sequential, but `<BOT_DOMAIN>` creates an
+interleaving point with your hosting layer:
+
+- **Pages 01 (steps 1 to 6) and 02** can and should be done first. They produce
+  `<APP_A_CLIENT_ID>`, `<APP_A_CLIENT_SECRET>`, and configure App B for OBO.
+  These values are required to configure and run the middle tier.
+- **`<BOT_DOMAIN>`** is the public HTTPS hostname (no scheme, no path) where
+  the middle tier serves `/api/messages`. You obtain it either from your deployed
+  Cloud Run service URL or from an active local dev tunnel (e.g. `ngrok http 8000`).
+- **Page 01 (steps 7 and 8) and Page 03** require `<BOT_DOMAIN>`. If deploying to
+  Cloud Run, pause after page 02 to deploy the backend and Cloud Run service,
+  then return to complete step 7 (Redirect URI), step 8 (Azure Bot endpoint),
+  and page 03 (Teams app packaging).
+
 ## The environment you are working in
 
 | Thing | Value |
@@ -31,17 +47,17 @@ arbitrary.
 | Tenant domain | `<TENANT_DOMAIN>` (M365 E5 dev sandbox) |
 | Tenant admin | `m365-admin@<TENANT_DOMAIN>` |
 | Test user | `analyst@<TENANT_DOMAIN>`, `oid` `<ANALYST_OBJECT_ID>` |
-| **App B** (federation app, **already exists**) | `<FEDERATION_APP_CLIENT_ID>` |
+| **App B** (federation app) | `<FEDERATION_APP_CLIENT_ID>` |
 | Google workforce pool | `locations/global/workforcePools/teams-bot-demo` |
 | Google provider | `entra` |
 | GCP org / project | `organizations/<GCP_ORG_ID>` / `<GCP_PROJECT_ID>` |
 | Provider issuer | `https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0` |
 
-> **Do not recreate App B and do not change its client ID.** Google's workforce
-> pool provider is configured to accept tokens whose `aud` equals
-> `<FEDERATION_APP_CLIENT_ID>`. Changing that ID means reconfiguring
-> the Google side, which is out of scope here. Everything page 02 asks you to do
-> to App B is additive and leaves the client ID untouched.
+> **App B and workforce pool pairing:** In a fresh deployment, App B is created
+> in `02_federation_app_obo.md` Step 0, and its Application (client) ID
+> (`<FEDERATION_APP_CLIENT_ID>`) is configured as the audience on Google Cloud's
+> Workforce Identity Pool provider. If you are adopting an existing workforce pool,
+> use the App B registration already paired with that provider.
 
 ## What is already proven, and what is not
 
@@ -50,8 +66,8 @@ Proven working before this runbook was written: a device-code sign-in as
 was exchanged at `https://sts.googleapis.com/v1/token` for a Google access
 token, which queried BigQuery as a workforce principal.
 
-So the right-hand half of the chain — *a JWT with the right `aud` and `iss` gets
-you into Google* — is not in question.
+So the right-hand half of the chain (*a JWT with the right `aud` and `iss` gets
+you into Google*) is not in question.
 
 Not yet built, and the entire subject of this runbook:
 
@@ -60,7 +76,7 @@ Not yet built, and the entire subject of this runbook:
 
 ## The critical design point (ADR 002)
 
-**A Teams SSO token cannot be sent to Google's STS. Not "should not" — cannot.**
+**A Teams SSO token cannot be sent to Google's STS. Not "should not": cannot.**
 
 When Teams performs SSO for a bot, it mints a token whose audience is *the bot's
 own app* (App A). Google's workforce pool provider validates the incoming
@@ -85,9 +101,9 @@ user's identity. That re-audienced token is what goes to Google.
 ## The two apps
 
 ```
-App A — Teams bot app                      App B — federation app
-NEW: you create this                       EXISTS: <FEDERATION_APP_CLIENT_ID>
-<APP_A_CLIENT_ID>                          DO NOT recreate
+App A: Teams bot app                       App B: federation app
+Created in 01                              Created in 02 (or pre-existing)
+<APP_A_CLIENT_ID>                          <FEDERATION_APP_CLIENT_ID>
 
 - has a client secret                      - Google's workforce pool provider
 - Azure Bot Service points at it             trusts this client ID as `aud`
@@ -107,7 +123,7 @@ Relationship, stated once, precisely:
 
 Note the direction. `preAuthorizedApplications` goes on the **resource** (App B)
 and names the **caller** (App A). The other manifest property people reach for,
-`knownClientApplications`, is the wrong knob for this topology — page 02
+`knownClientApplications`, is the wrong knob for this topology: page 02
 explains why in one paragraph.
 
 ## The trust chain, end to end
@@ -120,7 +136,7 @@ explains why in one paragraph.
         │   oid = <ANALYST_OBJECT_ID>
         ▼
 3. Bot middle tier receives it on the signin/tokenExchange invoke activity
-        │   (middle tier validates the inbound activity signature FIRST —
+        │   (middle tier validates the inbound activity signature FIRST:
         │    an unvalidated activity is an attacker asserting any oid it likes)
         ▼
 4. Middle tier calls Entra token endpoint, OBO
@@ -131,7 +147,7 @@ explains why in one paragraph.
         │   assertion       = the token from step 2
         │   scope           = api://<FEDERATION_APP_CLIENT_ID>/access_as_user
         ▼
-5. Entra returns an ACCESS token — note: an access token, not an ID token
+5. Entra returns an ACCESS token (note: an access token, not an ID token
         │   aud = <FEDERATION_APP_CLIENT_ID>   ← ONLY if App B has
         │   iss = https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0
         │   oid = <ANALYST_OBJECT_ID>     requestedAccessTokenVersion = 2
@@ -165,7 +181,7 @@ Entra's default for `requestedAccessTokenVersion` is **null, which means 1**.
 
 So an App B left at its default will hand you an OBO token with
 `aud = api://<FEDERATION_APP_CLIENT_ID>` and `iss = https://sts.windows.net/<ENTRA_TENANT_ID>/`,
-and Google will reject it twice over — wrong audience *and* wrong issuer —
+and Google will reject it twice over: wrong audience and wrong issuer:
 while every other part of your setup looks perfectly correct.
 
 Setting `requestedAccessTokenVersion: 2` on App B fixes both. Page 02 walks

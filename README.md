@@ -149,8 +149,10 @@ terraform plan    # five variables have no default; supply them from your .env
 ```
 
 The workforce identity pool, its Entra provider, the IAM bindings and the API
-enablement all live here. Read `terraform/README.md` first, and
-`terraform/IMPORT.md` if any of these resources already exist.
+enablement all live here. For a fresh deployment from scratch, `terraform apply`
+creates the workforce pool and provider directly. If adopting an existing workforce
+pool in your organization, follow `terraform/IMPORT.md` before applying to bring
+existing resources into state.
 
 Note what is deliberately **absent**: there is no `google_org_policy_policy`
 resource. An org policy resource is authoritative for its constraint, so
@@ -161,8 +163,11 @@ by whoever owns it. `terraform/workforce_pool.tf` explains the check to run.
 
 ### 2. Microsoft Entra side
 
-Follow `entra/` in order. This is the part that cannot be automated; it is
-click-by-click in the Azure and Entra portals, and it needs admin consent.
+Follow `entra/` in order for registrations, with one sequencing note for `<BOT_DOMAIN>`:
+
+- Complete `entra/01_bot_app_registration.md` (steps 1 to 6) and `entra/02_federation_app_obo.md` first to produce `<APP_A_CLIENT_ID>` and `<APP_A_CLIENT_SECRET>`, which the middle tier requires.
+- If deploying to Cloud Run, pause before step 7 of 01 and page 03. Deploy BigQuery, the agent, and the Cloud Run middle tier (Stages 3 to 5) to obtain your live Cloud Run URL. Strip `https://` to get `<BOT_DOMAIN>`, then return to finish the Redirect URI (01 step 7), messaging endpoint (01 step 8), and Teams app manifest packaging (03).
+- If developing locally with a tunnel (such as `ngrok http 8000`), use the tunnel hostname as `<BOT_DOMAIN>` from the start and follow all pages sequentially.
 
 | Page | What it does |
 |---|---|
