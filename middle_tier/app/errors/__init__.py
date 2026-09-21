@@ -66,6 +66,7 @@ from .templates import (
     oauth_card,
     render,
     signin_card,
+    sso_prompt,
     transient_failure,
     unsupported_activity,
     welcome,
@@ -104,6 +105,7 @@ __all__ = [
     "unsupported_activity",
     "signin_card",
     "oauth_card",
+    "sso_prompt",
     "render",
     # boundary
     "BoundaryOutcome",

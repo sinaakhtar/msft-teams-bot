@@ -91,6 +91,7 @@ from .routing import Dependencies
 from .runtime import ReasoningEngineRuntimeClient
 from .sessions.client import SessionsRestClient
 from .sessions.manager import AgentRuntimeSessionManager
+from .sso import SsoState
 from .streaming.connector import BotConnectorTransport
 from .streaming.renderer import TeamsStreamingRenderer
 from .streaming.teams_sink import ConnectorTeamsSink
@@ -421,11 +422,29 @@ def build_dependencies(
     )
     renderer = TeamsRendererFactory(transport=transport)
 
+    async def reply_sender(
+        activity: Mapping[str, Any], conversation_ref: Mapping[str, Any]
+    ) -> Any:
+        """Deliver one non-streamed activity (a template) to a conversation.
+
+        The streaming renderer covers agent answers. This covers everything
+        else the router says: the welcome, the ADR 004 refusals, the reset
+        acknowledgement. Both legs go over the same transport and the same
+        outbound credential; the difference is only that these are one-shot.
+        """
+        return await transport.send_activity(
+            activity, conversation_ref=conversation_ref
+        )
+
     deps = Dependencies(
         identity_broker=identity_broker,
         sessions=sessions,
         runtime=runtime,
         renderer=renderer,
+        reply_sender=reply_sender,
+        sso_state=SsoState(),
+        oauth_connection_name=settings.oauth_connection_name,
+        token_exchange_uri=settings.token_exchange_uri,
         signin_url=settings.signin_url,
         support_contact=settings.support_contact,
     )
@@ -438,7 +457,23 @@ def build_dependencies(
         engine=runtime.engine_name,
         authorization_id=runtime.authorization_id,
         workforce_pool=settings.workforce_pool_id,
+        oauth_connection=settings.oauth_connection_name or "<unset>",
     )
+
+    if not settings.oauth_connection_name:
+        # Not fatal: the service still authenticates, routes and refuses
+        # honestly. But no turn can ever succeed, because Teams only starts
+        # the silent exchange when an OAuthCard names a connection. Said at
+        # startup so it is visible once, rather than inferred later from
+        # every user being asked to sign in forever.
+        log_event(
+            logger,
+            logging.WARNING,
+            "OAUTH_CONNECTION_NAME is not set; Teams SSO cannot start and "
+            "every turn will refuse. Set it to the name of the OAuth "
+            "Connection Setting on the Azure Bot resource (runbook 11, 5a).",
+        )
+
     return deps
 
 
@@ -452,7 +487,19 @@ def assert_fully_wired(deps: Dependencies) -> None:
     """
     unwired = [
         name
-        for name in ("identity_broker", "sessions", "runtime", "renderer")
+        for name in (
+            "identity_broker",
+            "sessions",
+            "runtime",
+            "renderer",
+            # Left None, every template the router produces is logged as
+            # delivered and seen by nobody. That was the live symptom.
+            "reply_sender",
+            # Left None, the SSO assertion has nowhere to live between the
+            # invoke that delivers it and the message that needs it, so every
+            # turn refuses no matter how well the exchange works.
+            "sso_state",
+        )
         if getattr(deps, name) is None
     ]
     if unwired:

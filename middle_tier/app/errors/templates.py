@@ -149,6 +149,49 @@ def oauth_card(
     return {"contentType": OAUTH_CARD_CONTENT_TYPE, "content": content}
 
 
+def sso_prompt(
+    *,
+    connection_name: str,
+    token_exchange_uri: str,
+) -> dict[str, Any]:
+    """The activity sent when a turn arrives with no usable user assertion.
+
+    This is the difference between SSO working and not working. A
+    :func:`signin_card` here, or an :func:`identity_failure`, is a dead end:
+    Teams only starts the silent exchange when it sees an OAuthCard carrying
+    a ``tokenExchangeResource``, so without one no ``signin/tokenExchange``
+    invoke is ever sent and the bot waits for a token that is not coming.
+
+    CARRIES NO TEXT, DELIBERATELY
+    -----------------------------
+    This first shipped with an explanatory line ("Connecting you to …, approve
+    the prompt once"). The assumption was that Teams either renders the whole
+    activity or swallows the whole activity. It does neither: it intercepts the
+    OAuthCard attachment and renders the message text anyway. So a successful,
+    fully silent sign-in still printed a sentence telling the user about a
+    prompt that never appeared.
+
+    Sending the attachment alone means the normal path shows nothing at all,
+    which is what a silent exchange should look like. When the silent path is
+    declined, Teams renders the card, and the card carries its own title and
+    button text, so the affordance is not lost.
+    """
+    if not connection_name:
+        raise ValueError("an SSO prompt needs the Azure Bot OAuth connection name")
+    if not token_exchange_uri:
+        raise ValueError("an SSO prompt needs the App ID URI to exchange against")
+
+    return {
+        "type": "message",
+        "attachments": [
+            oauth_card(
+                connection_name=connection_name,
+                token_exchange_uri=token_exchange_uri,
+            )
+        ],
+    }
+
+
 # ==========================================================================
 # Template (a): identity failure
 # ==========================================================================

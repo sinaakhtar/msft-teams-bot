@@ -47,7 +47,8 @@ anywhere is ever retried under a service account.
 | `app/caller_identity.py` | `entra:{tid}:{oid}` extraction. ADR 003, fail closed. Named this way because `app/identity/` is the OBO/STS broker package — see NOTES.md. |
 | `app/ports.py` | Protocol seams: IdentityBroker, SessionManager, AgentRuntimeClient, StreamingRenderer. |
 | `app/routing.py` | Activity dispatch: `message`, `/new`, `conversationUpdate`, `invoke`. |
-| `app/errors.py` | ADR 004 user-facing templates. Fixed text, no model in the loop. |
+| `app/errors/` | ADR 004 user-facing templates, taxonomy, classification and the tool boundary. Fixed text, no model in the loop. Includes `sso_prompt`, the OAuthCard that starts the silent Teams exchange. |
+| `app/sso.py` | Per-user state spanning the `signin/tokenExchange` invoke and the message that needs it: assertion, parked turn, exchange dedup. In memory, hence the single-instance pin. |
 | `app/config.py` | Secret Manager wiring + a loud dev-only env fallback. |
 | `app/logging_utils.py` | Cloud Run JSON logging and token redaction. |
 | `app/main.py` | aiohttp app: `/api/messages`, `/healthz`, `/readyz`. |
@@ -116,14 +117,29 @@ gcloud run deploy teams-middle-tier \
   --source middle_tier \
   --service-account teams-middle-tier@<GCP_PROJECT_ID>.iam.gserviceaccount.com \
   --allow-unauthenticated \
+  --min-instances=1 --max-instances=1 \
   --set-env-vars GCP_PROJECT_ID=<GCP_PROJECT_ID>,\
 GCP_PROJECT_NUMBER=<GCP_PROJECT_NUMBER>,\
 GCP_LOCATION=us-central1,\
 ENTRA_TENANT_ID=<ENTRA_TENANT_ID>,\
 MICROSOFT_APP_ID=<bot app id>,\
 MICROSOFT_APP_TYPE=SingleTenant,\
+OAUTH_CONNECTION_NAME=<OAUTH_CONNECTION_NAME>,\
 REASONING_ENGINE_ID=<REASONING_ENGINE_ID>
 ```
+
+`OAUTH_CONNECTION_NAME` is the name of the OAuth Connection Setting on the
+Azure Bot resource (runbook 11, step 5a). Without it the service starts, logs a
+WARNING, and refuses every turn: Teams only begins the silent token exchange
+when the bot sends an OAuthCard naming a connection, so no assertion ever
+arrives. It is not optional for a working bot.
+
+`--min-instances=1 --max-instances=1` is a **correctness** constraint, not a
+latency one. The Teams SSO assertion (`app/sso.py`) and the session mapping
+(`app/sessions/`) are both held in process memory. On more than one instance
+the `signin/tokenExchange` invoke and the `message` that needs it can land on
+different processes, and the user gets an endless sign-in loop; on scale to
+zero the assertion dies with the instance. Runbook 11, step 6a.
 
 `REASONING_ENGINE_ID=<REASONING_ENGINE_ID>` is **ours**: display name
 `teams-bot-bq-analyst`, deployed 2026-09-07, full resource name
@@ -157,13 +173,22 @@ Then point the Azure Bot registration's messaging endpoint at
 
 ## Status
 
+Working end to end against a real Teams client as of 2026-09-21: a 1:1 message
+is authenticated, the Teams SSO assertion is exchanged silently, the turn is
+answered as the signed-in human, and `select session_user()` returns the
+workforce-pool principal rather than a service account.
+
 Built and tested here: JWT validation, identity extraction, routing, error
-templates, config/secrets, logging, health. Owned by other components and
-currently stubbed behind the `app/ports.py` Protocols: the OBO/STS identity
-broker, session management, runtime invocation, and streaming rendering. The
-Teams SSO `invoke` handler returns `501` until the broker lands — deliberately
-not `200`, which would tell Teams the exchange succeeded and leave the user
-waiting for a reply that never comes.
+templates, config/secrets, logging, health, outbound Bot Connector delivery,
+and the Teams SSO token exchange. The `app/ports.py` Protocols are all wired in
+`app/composition.py`.
+
+Two constraints worth knowing before you deploy this anywhere real:
+
+- Per-user state is in process memory, so the service must be pinned to a
+  single always-on instance. See the deploy section above.
+- The SSO replay runs inside the `invoke` request, so it is subject to the same
+  reply-window limit as any other turn.
 
 See `NOTES.md` for what was executed versus merely written, the SDK-versus-PyJWT
 decision, and open items.

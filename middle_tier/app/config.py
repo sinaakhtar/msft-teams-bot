@@ -194,6 +194,24 @@ class Settings:
     log_level: str = "INFO"
     signin_url: str | None = None
     support_contact: str | None = None
+    #: Name of the OAuth Connection Setting on the Azure Bot resource
+    #: (runbook 11, step 5a). Teams will only perform the SILENT token
+    #: exchange if an OAuthCard names a connection whose **Token Exchange
+    #: URL** is set to the App ID URI. Leave this empty and the bot falls
+    #: back to the visible sign-in card, which never yields a token.
+    oauth_connection_name: str = ""
+
+    @property
+    def token_exchange_uri(self) -> str:
+        """The App ID URI Teams mints the user assertion against.
+
+        Must equal the `webApplicationInfo.resource` in the Teams manifest and
+        the Token Exchange URL on the OAuth connection. If these three
+        disagree, Teams either does not attempt SSO at all or returns a token
+        with the wrong `aud`, and the OBO exchange then fails downstream where
+        the cause is no longer visible.
+        """
+        return f"api://botid-{self.microsoft_app_id}"
 
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return (
@@ -297,6 +315,7 @@ def load_settings() -> Settings:
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         signin_url=os.environ.get("SIGNIN_URL") or None,
         support_contact=os.environ.get("SUPPORT_CONTACT") or None,
+        oauth_connection_name=os.environ.get("OAUTH_CONNECTION_NAME", ""),
     )
 
     if _env_flag("ALLOW_BOT_EMULATOR", False) and not dev_mode:

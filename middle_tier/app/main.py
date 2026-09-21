@@ -162,6 +162,12 @@ async def messages(request: web.Request) -> web.Response:
         logger.exception("routing failure")
         return web.json_response({"error": "internal"}, status=500)
 
+    # NOTE: `result.reply` has already been delivered to the conversation over
+    # the Bot Connector by the router. It deliberately does NOT come back here.
+    # The Bot Framework ignores the body of a message/conversationUpdate POST
+    # and reads only the status code, so anything written here is invisible to
+    # the user. `result.body` is reserved for `invoke`, whose response body is
+    # the protocol payload. See routing.RouteResult.
     if result.body is None:
         return web.Response(status=result.status)
     return web.json_response(dict(result.body), status=result.status)

@@ -40,6 +40,14 @@ still cannot talk to this bot in Teams, and the blocker is not any of the four
 collaborators. It is the Teams SSO `invoke` handler, which is still a 501 stub,
 so no real turn will ever carry the token the whole chain depends on. §9.1.
 
+> **Update, 2026-09-21.** §9.1 and §9.2 are both resolved, and a third defect
+> that this pass did not find was resolved with them: replies were being
+> returned in the HTTP response body, which the Bot Framework discards, so
+> every template the router produced was delivered to nobody. A human can now
+> talk to the bot end to end. The record below is left as written, because what
+> a pass concluded at the time is worth more than a tidied version of it; see
+> the inline notes on each item.
+
 ---
 
 ## 2. The survey, done before writing anything
@@ -481,6 +489,18 @@ Ordered by what blocks a working demo.
 
 ### 9.1 The Teams SSO `invoke` handler is still a 501 stub — **the actual blocker**
 
+> **RESOLVED 2026-09-21.** Implemented in `routing.py::_handle_token_exchange`
+> with per-user state in `app/sso.py`: assertion storage keyed on
+> `entra:{tid}:{oid}`, dedup on `value.id`, 412 on failure, and replay of the
+> turn parked before sign-in. Covered by `tests/test_sso_exchange.py`.
+>
+> The analysis below was correct but incomplete in one way worth recording: it
+> treated the handler as the whole job. It is not. Teams never sends
+> `signin/tokenExchange` unless the bot first sends an **OAuthCard** naming an
+> Azure Bot OAuth connection, and this build was sending a plain sign-in card.
+> A perfect handler would have sat there never being called. The prompt, not
+> the handler, was the thing actually missing.
+
 This is the one that stops everything, and it is not any of the four
 collaborators.
 
@@ -500,6 +520,18 @@ concurrent exchange requests Teams sends across a user's clients, and HTTP 412
 on failure so Teams retries the sign-in.
 
 ### 9.2 On a failure the user may get two messages
+
+> **RESOLVED 2026-09-21**, via `routing.py::_reply_unless_rendered`, which
+> suppresses the router's template on every `_handle_agent_turn` error path
+> where a renderer is live.
+>
+> Worth noting *why* this was safe to leave at the time and was not safe to
+> leave afterwards: the duplicate could not be observed, because the router's
+> second message was being written into the HTTP response body and discarded
+> by the Bot Framework. One of the two messages was always going nowhere. The
+> moment reply delivery was fixed, a latent cosmetic defect became a real one
+> in the same change, which is the argument for fixing both together rather
+> than shipping the delivery fix alone.
 
 When a renderer is wired and the stream fails, `TurnRenderer.finish(error=...)`
 lets the renderer terminate the Teams bubble with its ADR 004 template, *and*

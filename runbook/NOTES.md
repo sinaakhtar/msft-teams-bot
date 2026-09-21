@@ -44,7 +44,7 @@ inherited facts, not as things this author ran.
 | `<CLOUD_RUN_URL>` | Full HTTPS base URL, no trailing slash | `gcloud run services describe` | Messaging endpoint |
 | `<BOT_DOMAIN>` | `<CLOUD_RUN_URL>` minus the scheme | Derived | Teams manifest `validDomains`, App A redirect URI |
 | `<REASONING_ENGINE_ID>` | Numeric ID of **our** reasoning engine | Agent Runtime deploy | Env var, audit log check |
-| `<OAUTH_CONNECTION_NAME>` | Name of the OAuth connection setting | You choose, step 5a | Sign-in card |
+| `<OAUTH_CONNECTION_NAME>` | Name of the OAuth connection setting. **Required** | You choose, step 5a | `OAUTH_CONNECTION_NAME` env var; the OAuthCard that triggers silent SSO |
 
 ### Runbook 12
 

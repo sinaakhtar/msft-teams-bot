@@ -232,16 +232,23 @@ popup, and that popup needs a registered redirect URI.
    `<BOT_DOMAIN>` is the public HTTPS hostname of your bot middle tier. It must
    be HTTPS, must not be `localhost` (see below), and must match a domain listed
    in `validDomains` in the Teams app manifest.
-4. If your bot uses the Bot Framework OAuth card for the fallback rather than a
-   self-hosted page, **also** add:
+4. **Also** add:
 
    ```
    https://token.botframework.com/.auth/web/redirect
    ```
 
-   Add this only if you are using `OAuthCard` / the Bot Framework token service.
-   It is inert otherwise. *(Inference from the Bot Framework OAuth connection
-   pattern, not verified against a current doc page — see NOTES.md.)*
+   This was written as conditional ("only if you are using `OAuthCard`"). It is
+   not conditional any more: the middle tier sends an `OAuthCard` on every turn
+   that has no user assertion yet, because that card is what makes Teams
+   perform the silent token exchange at all. See `middle_tier/app/errors/
+   templates.py::sso_prompt` and runbook 11, step 5a.
+
+   Note the bot does **not** redeem the assertion through the Bot Framework
+   token service: it runs its own OBO chain (ADR 002) and consumes
+   `value.token` directly. The OAuth connection exists to make Teams start the
+   exchange, and this redirect URI backs the visible fallback when the silent
+   path is declined.
 5. Under **Implicit grant and hybrid flows**, leave **both** checkboxes
    (*Access tokens*, *ID tokens*) **unticked**. The implicit flow is not used
    here and Microsoft documents a specific hazard: an ID token obtained via

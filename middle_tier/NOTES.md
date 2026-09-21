@@ -612,15 +612,34 @@ credential" (`IdentityUnavailable`, sign-in card).
 | `AgentRuntimeClient` | Runtime component | Message turns return the transient-failure template. |
 | `StreamingRenderer` | Streaming component (now `app/streaming/`) | Skipped when absent. |
 
-**Teams SSO token exchange** (`invoke` / `signin/tokenExchange`) is stubbed in
-`routing.py::_handle_invoke` with a `TODO` naming the owning component and the
-required implementation in order, including the `value.id` de-duplication step
-(Teams sends the same exchange to every active instance; without dedup two
-instances race to redeem one assertion and one gets a replay error).
+**Teams SSO token exchange** (`invoke` / `signin/tokenExchange`) — **built
+2026-09-21**, superseding the 501 stub described here.
 
-It returns **501, deliberately not 200**. A 200 tells Teams the exchange
-succeeded, and the user then waits for a reply that never comes. Tested:
-`test_sso_invoke_returns_501_not_200`.
+`routing.py::_handle_token_exchange` attributes the exchange (ADR 003) before
+redeeming it, dedups on `value.id`, redeems through `IdentityBroker`, stores
+the assertion in `app/sso.py`, and replays the turn parked before sign-in.
+Returns **200 with an empty body** on success and **412** on failure, the
+latter because 412 is what Teams reads as "consent needed" and falls back to
+the visible card on; a 500 makes Teams give up, and a 200 on a failed exchange
+strands the user waiting. `test_sso_invoke_returns_501_not_200` is replaced by
+`tests/test_sso_exchange.py`.
+
+The stub description was accurate about the handler and silent about the thing
+that actually mattered. Teams does not send `signin/tokenExchange` off its own
+bat: it sends it in response to an **OAuthCard** naming an Azure Bot OAuth
+connection. This build was sending a plain sign-in card, so the invoke would
+never have arrived however good the handler was. `errors.sso_prompt` is the
+missing half.
+
+Two constraints came with it, both recorded rather than hidden:
+
+- The assertion store is in process memory, so the service must run pinned to a
+  single always-on instance (`--min-instances=1 --max-instances=1`). The
+  session mapping in `app/sessions/` already carried the same requirement.
+- The replay runs inside the `invoke` request rather than a background task,
+  because Cloud Run throttles CPU outside a request and a detached turn can
+  stall with nothing to surface it. The cost is that the invoke now carries a
+  full agent turn.
 
 Degradation is honest throughout: where a component is missing the user gets a
 "something on my side failed — this is not a permissions problem" message. The

@@ -270,10 +270,23 @@ def wired_dependencies(
     """Assemble the router's collaborators using the REAL adapters."""
     inner_broker = inner_broker or FakeInnerBroker()
     sessions_client = NamedFakeSessionsClient()
+    delivered: list[dict[str, Any]] = []
+
+    async def reply_sender(activity, conversation_ref):
+        """Stands in for the Bot Connector's one-shot send.
+
+        A template that is built but not posted here is a template no human
+        ever reads, so `delivered` is the only honest evidence that a refusal
+        reached the user.
+        """
+        delivered.append(dict(activity))
+        return {"id": f"posted-{len(delivered)}"}
+
     parts: dict[str, Any] = {
         "inner_broker": inner_broker,
         "sessions_client": sessions_client,
         "renderer_factory": RecordingRendererFactory(),
+        "delivered": delivered,
     }
     deps = Dependencies(
         identity_broker=PortsIdentityBroker(
@@ -285,6 +298,7 @@ def wired_dependencies(
         ),
         runtime=runtime,
         renderer=parts["renderer_factory"],
+        reply_sender=reply_sender,
         signin_url="https://example.invalid/signin",
         support_contact="the data platform team",
     )
@@ -486,9 +500,11 @@ async def test_activity_without_aad_object_id_is_refused_and_never_invokes():
     # 200, because a refusal delivered is a successful delivery of a refusal.
     # A non-2xx would make Azure Bot Service retry the same doomed activity.
     assert result.status == 200
-    assert result.body is not None
+    assert result.reply is not None
+    # Built AND delivered. The response body is not a delivery channel.
+    assert parts["delivered"] == [dict(result.reply)]
 
-    body = json.dumps(result.body)
+    body = json.dumps(result.reply)
     assert MRI not in body, "the MRI leaked into the refusal message"
 
 
@@ -546,17 +562,29 @@ async def test_a_downstream_403_produces_the_templated_denial():
     )
 
     assert result.status == 200
-    assert result.body is not None
 
     expected = errors.downstream_denial(
         resource=denial.resource,
         user_display="A Person",
         request_id=activity["id"],
     )
-    assert result.body == expected, result.body
+
+    # A renderer is wired, so the denial reaches the user by terminating the
+    # streaming bubble, NOT as a second one-shot activity. The router must
+    # stay quiet here: sending its template as well would post the same
+    # refusal twice, which is what a user reads as the bot stuttering.
+    assert result.reply is None
+    assert parts["delivered"] == [], "the renderer already spoke; this is a duplicate"
+
+    sink = parts["renderer_factory"].sinks[-1]
+    delivered_text = sink.final_text
+    assert delivered_text is not None, "the denial never reached the user"
 
     # The refused resource is named, which is the actionable half of ADR 004.
-    assert ENGINE_ID in json.dumps(result.body)
+    assert denial.resource in delivered_text
+    assert ENGINE_ID in delivered_text
+    # Still template prose, not a model's explanation of an IAM error.
+    assert delivered_text == expected["text"]
 
     # And the turn was not retried under anything else.
     assert len(runtime.invocations) == 1
@@ -588,7 +616,7 @@ async def test_an_identity_failure_becomes_a_signin_prompt_not_a_500():
     )
 
     assert result.status == 200
-    assert result.body is not None
+    assert result.reply is not None
     assert runtime.invocations == []
 
     expected = errors.identity_failure(
@@ -596,7 +624,9 @@ async def test_an_identity_failure_becomes_a_signin_prompt_not_a_500():
         reason_code="token_exchange_failed",
         support_contact="the data platform team",
     )
-    assert result.body == expected, result.body
+    assert result.reply == expected, result.reply
+    # The sign-in prompt is only useful if it arrives.
+    assert parts["delivered"] == [expected]
 
 
 # ==========================================================================

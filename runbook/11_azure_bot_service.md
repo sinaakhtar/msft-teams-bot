@@ -41,7 +41,7 @@ line between documented fact and reasoning.
 | `<CLOUD_RUN_URL>` | Full HTTPS base URL Cloud Run assigns, no trailing slash | `gcloud run services describe` |
 | `<BOT_DOMAIN>` | `<CLOUD_RUN_URL>` with the scheme stripped | Derived |
 | `<REASONING_ENGINE_ID>` | Numeric ID of **our** reasoning engine | The Agent Runtime deploy |
-| `<OAUTH_CONNECTION_NAME>` | Name of the OAuth connection setting, if you create one | Step 6 |
+| `<OAUTH_CONNECTION_NAME>` | Name of the OAuth connection setting. **Required** — without it no turn can succeed | Step 5a |
 
 Known values, do not retype from memory and do not change:
 
@@ -560,23 +560,33 @@ Service for the user's token rather than exchanging one itself.
 
 ### Which do you need?
 
-You need **Path A** for the demo to be honest — the identity has to originate
-from the signed-in Teams user without a separate login. You need **Path B**
-configured as well if either of these is true:
+You need **both**. This was written as "Path A, plus Path B if you want a
+working sign-in card", and that is wrong: Path B is what makes Path A happen at
+all.
 
-- You want the ADR 004 identity-failure **sign-in card** to actually be
-  clickable rather than decorative. ADR 004 says on identity failure the turn is
-  refused "with an explicit message and a sign-in card", and that card needs a
-  connection to point at.
-- You intend to demo via the Step 4a embed-code chat, which bypasses the Teams
-  app manifest and therefore bypasses SSO.
+Teams does not start the silent exchange on its own. It starts it when the bot
+sends an **OAuthCard** carrying a `tokenExchangeResource`, and an OAuthCard has
+to name an OAuth connection. No connection means no card, which means no
+`signin/tokenExchange` invoke, which means the middle tier never receives a
+user assertion and refuses every turn with a sign-in prompt the user can never
+satisfy. The symptom is a bot that reads your message and says nothing useful,
+forever.
+
+So:
+
+- **Path A** is what makes the identity originate from the signed-in Teams user
+  without a separate login.
+- **Path B** is the trigger for Path A, *and* the fallback rail underneath it,
+  *and* what makes the ADR 004 sign-in card clickable rather than decorative.
+- You need Path B regardless if you intend to demo via the Step 4a embed-code
+  chat, which bypasses the Teams app manifest and therefore bypasses SSO.
 
 Note that the Microsoft SSO overview describes the fallback explicitly: if
 consent fails, "the authentication falls back to the sign-in prompt and the app
 user must sign in to use the bot app." So Path B is the fallback rail under
 Path A, not an alternative to it.
 
-### 5a. Create the OAuth connection setting (only if you decided you need it)
+### 5a. Create the OAuth connection setting (required)
 
 Path: **Azure Bot resource → Settings → Configuration**, then scroll to
 **OAuth Connection Settings near the bottom of the page** and select
@@ -605,11 +615,38 @@ as *each* demo user, not just as the admin — consent is per user.
 
 ### 5b. If you skip the OAuth connection
 
-Set `SIGNIN_URL` on the Cloud Run service to a URL that tells the user what to
-do (a wiki page, a support contact), so the ADR 004 identity-failure message has
-somewhere to point. A message with a dead card is worse than a message with a
-link to a human. `SUPPORT_CONTACT` serves the same purpose in the templated
-errors.
+You get a bot that authenticates every inbound activity correctly, routes it
+correctly, and then refuses the turn. Every turn. There is no token path
+without the connection, so this is not a degraded demo, it is a non-working
+one. The middle tier says so at startup:
+
+```
+OAUTH_CONNECTION_NAME is not set; Teams SSO cannot start and every turn
+will refuse.
+```
+
+If you are deliberately deferring SSO, set `SIGNIN_URL` and `SUPPORT_CONTACT`
+on the Cloud Run service so the ADR 004 refusal at least points a human
+somewhere. A message with a dead card is worse than a message with a link to a
+person. But be clear with yourself that this is the "prove the wire works"
+configuration, not the demo.
+
+### 5c. The Token Exchange URL is the field that matters
+
+Of everything on that form, **Token Exchange URL** is the one that silently
+decides whether SSO works. Three values must agree exactly:
+
+| Where | Value |
+| --- | --- |
+| OAuth connection → **Token Exchange URL** | `api://botid-<APP_A_CLIENT_ID>` |
+| Teams manifest → `webApplicationInfo.resource` | `api://botid-<APP_A_CLIENT_ID>` |
+| Cloud Run → derived from `MICROSOFT_APP_ID` | `api://botid-<APP_A_CLIENT_ID>` |
+
+A mismatch does not produce a clear error anywhere. Teams either declines to
+attempt SSO at all and shows a visible card, or it returns a token whose `aud`
+is wrong and the failure surfaces later at the OBO exchange, several layers
+from the cause. Leaving the field blank gives you a plain sign-in card and no
+silent exchange, which reads like an application bug and is not one.
 
 ---
 
@@ -630,7 +667,8 @@ ones (logging `startup configuration failed` at CRITICAL and exiting 2).
 | `GCP_PROJECT_NUMBER` | `<GCP_PROJECT_NUMBER>` | Used to build the reasoning engine resource name |
 | `GCP_LOCATION` | `us-central1` | |
 | `REASONING_ENGINE_ID` | `<REASONING_ENGINE_ID>` | **Ours.** Never `<OTHER_ENGINE_ID_1>`. |
-| `SIGNIN_URL` | optional | Backs the ADR 004 sign-in card |
+| `OAUTH_CONNECTION_NAME` | `<OAUTH_CONNECTION_NAME>` | **Required for a working bot.** Name of the Step 5a OAuth connection, matched exactly. Unset means every turn refuses; the service logs a WARNING at startup and still serves. |
+| `SIGNIN_URL` | optional | Backs the ADR 004 sign-in card on the refusal path |
 | `SUPPORT_CONTACT` | optional | Appears in templated failure messages |
 | `LOG_LEVEL` | `INFO` | `DEBUG` is noisy and the formatter redacts, but do not run a demo on DEBUG |
 | `MIDDLE_TIER_DEV_MODE` | **unset** | |
@@ -659,6 +697,40 @@ gcloud logging read \
 are one environment variable away from an endpoint that trusts a token minted by
 anyone with the Emulator.
 
+### Step 6a — Pin the service to one instance
+
+**Required, and it is a correctness constraint rather than a cost one.**
+
+```bash
+gcloud run services update <CLOUD_RUN_SERVICE> \
+  --project <GCP_PROJECT_ID> --region us-central1 \
+  --min-instances=1 --max-instances=1
+```
+
+Two pieces of per-user state are held in process memory: the Teams SSO
+assertion (`app/sso.py`) and the session mapping
+(`app/sessions/README.md`). Neither is durable, so:
+
+- **More than one instance** and the `signin/tokenExchange` invoke can land on
+  a different process than the `message` that needs it. The second process
+  sees no assertion and prompts for sign-in again. The user experiences an
+  endless sign-in loop and nothing in the logs looks like an error.
+- **Scale to zero** and the assertion dies with the instance, so the first turn
+  after an idle period re-prompts. This one hides well in a demo, because a
+  warm instance behaves perfectly right up until it doesn't.
+
+Confirm it took:
+
+```bash
+gcloud run services describe <CLOUD_RUN_SERVICE> \
+  --project <GCP_PROJECT_ID> --region us-central1 \
+  --format='value(spec.template.metadata.annotations["autoscaling.knative.dev/minScale"],spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"])'
+```
+
+Both must read `1`. This is a demo-grade answer to a real architectural
+question; the durable fix is a shared store (Firestore), and until that lands
+the pin belongs in the deploy config rather than in somebody's memory.
+
 ---
 
 ## Step 7 — Round-trip validation in a real Teams client
@@ -673,14 +745,17 @@ Open the URL you copied in Step 4a. Teams opens a 1:1 chat with the bot.
 Send: `hello`
 
 **What "the wire works" looks like:** the middle tier logs an accepted activity
-within a second or two, and Teams shows *some* reply. Given SSO is not available
-in this mode, the honest expected reply is the ADR 004 identity-failure message
-plus a sign-in card (if you did Step 5) or the identity-failure message alone.
+within a second or two, and Teams shows *some* reply. This mode bypasses the
+app manifest, so there is no `webApplicationInfo` and the silent exchange
+cannot happen. The honest expected reply is the "Connecting you to …" message
+with a **visible** sign-in button: the OAuthCard rendering as a card, which is
+exactly what it is supposed to do when the silent path is unavailable.
 
 **Do not read that as failure.** At this point you have proved: Teams reached
 Bot Service, Bot Service reached Cloud Run over the public internet with a valid
-certificate, the JWT validated, the router ran, and a reply travelled back. Only
-the identity plane is missing, and it is missing for a documented reason.
+certificate, the JWT validated, the router ran, and a reply travelled back over
+the Bot Connector. Only the silent identity plane is missing, and it is missing
+because this mode cannot carry it.
 
 If you see *nothing at all* in Teams, jump to troubleshooting.
 
@@ -696,23 +771,32 @@ Send: `hello`
 
 1. Teams shows the message as sent.
 2. On the very first turn only, a consent prompt may appear. Approve it. This is
-   the one-time consent the SSO overview describes.
-3. The bot replies. What it says depends on which components are wired; the
-   welcome template is the expected first response.
-4. Ask a real question, e.g. `who am I to BigQuery?`. Expect an informative
-   update while the tool runs, then an answer. (The streaming/informative-update
-   renderer is a separate work item — see [NOTES.md](NOTES.md). If it is not
-   wired, you get the answer with no intermediate update, which is less
-   compelling on stage but not a fault in this runbook's scope.)
+   the one-time consent the SSO overview describes. On a tenant where consent
+   has already been granted you will see **no sign-in UI at all** — the
+   exchange happens silently and this step is invisible.
+3. A short "Connecting you to …" message appears. This is the OAuthCard being
+   delivered. When SSO is working the card itself never renders; you only see
+   the line of text.
+4. The bot answers the question you already asked. It is not a welcome message
+   and you do not have to retype: the turn was parked while the exchange
+   happened and is replayed once the assertion arrives.
+5. Ask a real question, e.g. `run select session_user()`. The answer should be
+   a `principal://iam.googleapis.com/…/workforcePools/<POOL>/subject/<OID>`,
+   which is the whole point: BigQuery is seeing the human, not a service
+   account.
 
 **What unhealthy looks like, and what each means:**
 
 | Symptom in Teams | Almost certainly |
 | --- | --- |
 | Red "Sorry, something went wrong" / retry chevron | Bot Service could not get a usable response: 5xx, timeout, or unreachable endpoint |
-| Nothing at all, no error | Activity never left Teams, or the Teams channel is not enabled, or you are in channel scope with an app that only declares personal scope |
+| Nothing at all, no error, but Cloud Run logs show `200` | The reply was produced and never delivered. The Bot Framework discards the HTTP response body; a reply only arrives via an outbound POST to the Connector. Check for `failed to deliver reply to Teams` or `no reply_sender is wired` in the logs. |
+| Nothing at all, and no activity in the logs either | Activity never left Teams, or the Teams channel is not enabled, or you are in channel scope with an app that only declares personal scope |
+| A **visible** sign-in button every time | The silent exchange is not happening. Token Exchange URL on the OAuth connection (Step 5c) is the first suspect, `webApplicationInfo` in the manifest the second. |
+| Asked to sign in again on every turn | The assertion is not surviving between turns. Check the service is pinned to a single instance (Step 6a); on more than one instance the invoke and the message land on different processes. |
 | A reply saying identity could not be established, with a sign-in card | The wire is fine; the OBO/STS chain is not. This is ADR 004 behaving correctly. Go to `entra/05_troubleshooting.md`. |
 | A reply naming a refused resource | Identity worked and a downstream system said no. This is also correct behaviour, and it is the failure demo in runbook 12. |
+| The answer arrives but the question had to be retyped | The parked turn expired (5 minutes) or the instance restarted between the message and the exchange. |
 
 ### 7c. Confirm in Cloud Run logs that the activity arrived and validated
 
@@ -970,9 +1054,14 @@ Tick every line before you consider this runbook complete. Each is checkable.
 - [ ] `dev_mode: false` and `emulator_trusted: false` in the `middle tier initialised` log line
 - [ ] `REASONING_ENGINE_ID` is ours, and is **not** `<OTHER_ENGINE_ID_1>`
 - [ ] Microsoft Teams channel enabled, commercial cloud, Calling off
-- [ ] OAuth connection setting created and **Test Connection** passed for each demo user — or consciously skipped with `SIGNIN_URL` set instead
+- [ ] OAuth connection setting created and **Test Connection** passed for each demo user
+- [ ] **Token Exchange URL** on that connection is exactly `api://botid-<APP_A_CLIENT_ID>`, and matches `webApplicationInfo.resource` in the manifest
+- [ ] `OAUTH_CONNECTION_NAME` on the live revision matches the connection name exactly
+- [ ] No `OAUTH_CONNECTION_NAME is not set` WARNING in the startup logs
 - [ ] A message sent from a real Teams 1:1 chat produced a reply
+- [ ] The first turn was answered **without** a visible sign-in card, and **without** retyping the question
+- [ ] `select session_user()` returns a `principal://…/workforcePools/<POOL>/subject/<OID>`, not a service account
 - [ ] `POST /api/messages` latency observed under 8 seconds on a warm instance
-- [ ] `--min-instances=1` set for the demo window
+- [ ] `--min-instances=1` **and** `--max-instances=1` set (Step 6a) — both, not just one
 
 Next: [12_demo.md](12_demo.md).

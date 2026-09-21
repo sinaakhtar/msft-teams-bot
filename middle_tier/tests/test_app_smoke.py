@@ -10,6 +10,7 @@ JWKS server. No external network.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -44,10 +45,43 @@ def _settings(**overrides) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
+class RecordingSender:
+    """Stands in for the Bot Connector and remembers what was posted.
+
+    Replies are delivered by an outbound POST to the connector, not returned
+    in the HTTP response, so "did the user see anything" is only answerable by
+    looking at what reached this object. Asserting on the response body
+    instead is what let the bot ship replying to nobody: every template was
+    built correctly, returned with a 200, and discarded by the Bot Framework.
+    """
+
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def __call__(self, activity, conversation_ref) -> dict:
+        self.sent.append(dict(activity))
+        return {"id": f"posted-{len(self.sent)}"}
+
+    @property
+    def only(self) -> dict:
+        """The single delivered activity, asserting there was exactly one."""
+        assert len(self.sent) == 1, f"expected exactly 1 reply, got {len(self.sent)}"
+        return self.sent[0]
+
+
 @pytest.fixture
-async def client(authenticator, aiohttp_client_factory):
+def sender() -> RecordingSender:
+    return RecordingSender()
+
+
+@pytest.fixture
+async def client(authenticator, aiohttp_client_factory, sender):
     settings = _settings()
-    app = create_app(settings=settings, authenticator=authenticator, deps=Dependencies())
+    app = create_app(
+        settings=settings,
+        authenticator=authenticator,
+        deps=Dependencies(reply_sender=sender),
+    )
     return await aiohttp_client_factory(app)
 
 
@@ -126,7 +160,9 @@ async def test_messages_rejects_non_json_body(client):
         assert resp.status == 400
 
 
-async def test_valid_token_reaches_the_router(client, keys: KeyMaterial, activity):
+async def test_valid_token_reaches_the_router(
+    client, keys: KeyMaterial, activity, sender
+):
     """End to end: signed token -> validation -> routing -> refusal template.
 
     No IdentityBroker is wired, so the honest outcome is a 200 carrying a
@@ -137,13 +173,18 @@ async def test_valid_token_reaches_the_router(client, keys: KeyMaterial, activit
         "/api/messages", json=activity, headers={"Authorization": f"Bearer {token}"}
     ) as resp:
         assert resp.status == 200
-        body = await resp.json()
+        # The response body is NOT the reply. The Bot Framework reads the
+        # status code and discards the body, so this must stay empty and the
+        # assertion that matters is on what was posted to the connector.
+        assert await resp.text() == ""
+
+    body = sender.only
     assert body["type"] == "message"
     assert "not a permissions problem" in body["text"]
 
 
 async def test_guest_user_without_aad_object_id_gets_the_fail_closed_message(
-    client, keys: KeyMaterial, activity
+    client, keys: KeyMaterial, activity, sender
 ):
     """ADR 003 end to end through the HTTP layer."""
     activity["from"] = {"id": "29:guest", "name": "Guest"}
@@ -153,8 +194,9 @@ async def test_guest_user_without_aad_object_id_gets_the_fail_closed_message(
         "/api/messages", json=activity, headers={"Authorization": f"Bearer {token}"}
     ) as resp:
         assert resp.status == 200
-        body = await resp.json()
+        assert await resp.text() == ""
 
+    body = sender.only
     assert "missing_aad_object_id" in body["text"]
     assert "29:guest" not in body["text"]
 
@@ -189,21 +231,73 @@ async def test_unknown_activity_type_is_ignored_safely(activity):
         assert result.handled is False
 
 
-async def test_sso_invoke_returns_501_not_200(activity):
-    """A 200 would tell Teams the exchange succeeded and leave the user
-    waiting for a reply that never comes."""
-    caller = AuthenticatedCaller(
+def _bot_caller() -> AuthenticatedCaller:
+    return AuthenticatedCaller(
         app_id=BOT_APP_ID,
         issuer="https://api.botframework.com",
         profile_name="bot_connector",
         service_url="https://smba.trafficmanager.net/emea/",
     )
+
+
+async def test_token_exchange_without_sso_configured_fails_with_412_not_200(activity):
+    """A 200 would tell Teams the exchange succeeded and leave the user
+    waiting for a reply that never comes.
+
+    412 is the code Teams reads as "consent needed", so it falls back to the
+    visible card instead of silently stranding the turn.
+    """
     result = await route_activity(
-        {**activity, "type": "invoke", "name": "signin/tokenExchange"},
-        caller=caller,
+        {
+            **activity,
+            "type": "invoke",
+            "name": "signin/tokenExchange",
+            "value": {"id": "exchange-1", "token": "an-assertion"},
+        },
+        caller=_bot_caller(),
         deps=Dependencies(),
     )
-    assert result.status == 501
+    assert result.status == 412
+    assert result.body is not None
+    assert result.body["id"] == "exchange-1"
+    # The failure detail is operator-facing and must never carry the token.
+    assert "an-assertion" not in json.dumps(result.body)
+
+
+async def test_token_exchange_with_no_token_is_refused(activity):
+    result = await route_activity(
+        {
+            **activity,
+            "type": "invoke",
+            "name": "signin/tokenExchange",
+            "value": {"id": "exchange-2"},
+        },
+        caller=_bot_caller(),
+        deps=Dependencies(),
+    )
+    assert result.status == 412
+
+
+async def test_an_invoke_reply_stays_in_the_body_and_is_never_posted(activity):
+    """The one activity type whose response body IS the protocol payload.
+
+    Posting it to the connector instead would both lose the protocol response
+    and put a raw failure object in the user's chat.
+    """
+    sender = RecordingSender()
+    result = await route_activity(
+        {
+            **activity,
+            "type": "invoke",
+            "name": "signin/tokenExchange",
+            "value": {"id": "exchange-3", "token": "an-assertion"},
+        },
+        caller=_bot_caller(),
+        deps=Dependencies(reply_sender=sender),
+    )
+    assert result.status == 412
+    assert result.reply is None
+    assert sender.sent == []
 
 
 async def test_conversation_update_welcomes_only_when_the_bot_is_added(activity):
@@ -219,17 +313,23 @@ async def test_conversation_update_welcomes_only_when_the_bot_is_added(activity)
         "recipient": {"id": "28:bot"},
     }
 
+    sender = RecordingSender()
+    deps = Dependencies(reply_sender=sender)
+
     human_joined = await route_activity(
-        {**base, "membersAdded": [{"id": "29:human"}]}, caller=caller, deps=Dependencies()
+        {**base, "membersAdded": [{"id": "29:human"}]}, caller=caller, deps=deps
     )
     assert human_joined.handled is False
-    assert human_joined.body is None
+    assert human_joined.reply is None
+    assert sender.sent == [], "greeting every human who joins is how a bot gets muted"
 
     bot_joined = await route_activity(
-        {**base, "membersAdded": [{"id": "28:bot"}]}, caller=caller, deps=Dependencies()
+        {**base, "membersAdded": [{"id": "28:bot"}]}, caller=caller, deps=deps
     )
-    assert bot_joined.body is not None
-    assert "**as you**" in bot_joined.body["text"]
+    assert bot_joined.reply is not None
+    assert "**as you**" in bot_joined.reply["text"]
+    # And it was actually delivered, not just constructed.
+    assert "**as you**" in sender.only["text"]
 
 
 # ==========================================================================
