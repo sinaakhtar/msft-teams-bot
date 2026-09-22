@@ -36,7 +36,7 @@ from .conftest import BOT_APP_ID, SERVICE_URL  # noqa: E402
 TENANT = "00000000-0000-0000-0000-000000000000"
 OID = "33333333-3333-3333-3333-333333333333"
 USER_KEY = f"entra:{TENANT}:{OID}"
-CONNECTION = "agent-runtime-bot-service"
+CONNECTION = "test-oauth-connection"
 EXCHANGE_URI = f"api://botid-{BOT_APP_ID}"
 
 
