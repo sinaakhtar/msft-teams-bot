@@ -133,6 +133,26 @@ scratch/
 bigquery/.rendered/
 
 # ---------------------------------------------------------------------------
+# Rendered Teams app manifest and package (render.sh output).
+#
+# The rendered manifest carries the tenant's Teams app GUID, the bot's Entra
+# app id and the public hostname of the middle tier. It is also the file you
+# are most tempted to edit in place, because Teams needs real values to
+# install it -- and an in-place edit then sits in `git status` looking like a
+# legitimate change. Track the template, ignore the output.
+# ---------------------------------------------------------------------------
+entra/manifest/.rendered/
+
+# The pre-render package, built before render.sh existed. Superseded and
+# un-sanitised; it also predates the icons, so Teams would reject it anyway.
+entra/teams-app-package.zip
+
+# Icons are deliberately NOT in the repository -- see entra/manifest/ICONS.md.
+# render.sh copies them into the package from here if you have produced them.
+entra/manifest/color.png
+entra/manifest/outline.png
+
+# ---------------------------------------------------------------------------
 # Sanitisation audit record.
 #
 # SANITISATION.md quotes every pre-sanitisation identifier verbatim, because an
