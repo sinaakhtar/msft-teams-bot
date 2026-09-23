@@ -28,7 +28,7 @@ Schema. That is the entirety of what was actually done.
 | `<BOT_DOMAIN>` | Public HTTPS hostname of middle tier, bare (no scheme) | Cloud Run URL minus scheme (Stage 5), or local tunnel hostname (ngrok) | 01 step 7, manifest `validDomains` and `developer.*Url` |
 | `<WORKFORCE_POOL_ID>` | Google Cloud workforce pool name | Created in Terraform or pre-existing (e.g. `teams-bot-demo`) | Terraform, 04, 05, .env |
 | `<WORKFORCE_PROVIDER_ID>` | Google Cloud workforce pool provider name | Created in Terraform or pre-existing (e.g. `entra`) | Terraform, 04, 05, .env |
-| `<GCP_PROJECT_ID>` | Google Cloud project hosting the middle tier and agent | Your GCP project (e.g. `donuts-dev`) | Terraform, 04, .env |
+| `<GCP_PROJECT_ID>` | Google Cloud project hosting the middle tier and agent | Your GCP project (e.g. `example-project`) | Terraform, 04, .env |
 | `<GCP_ORG_ID>` | Google Cloud organization ID | `gcloud organizations list` | Terraform org policies / IAM |
 | `<ANALYST_OBJECT_ID>` | Entra User Object ID for test user | Entra ID -> Users -> User -> Object ID | 04 testing, BigQuery RLS |
 | `<TEAMS_APP_GUID>` | Identifier for the Teams app package | `uuidgen`; **not** App A's client ID | `manifest.json` `id` |
